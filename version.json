@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
   "scriptUrl": "https://raw.githubusercontent.com/AnisRafid/safegaze-yt-ads-blocker/main/youtube-ads-blocker.js",
-  "sha256": "770821df514691fb7332627c529c7066efa04f736aed5f4be9630f2375e136e3",
+  "sha256": "0efcea43673329cfaa8a6c7a718b9a526ce74d8ec4a4aab38459eb0fd3f93cbb",
   "minExtensionVersion": "3.4.0",
   "updatedAt": "2024-12-02T00:00:00Z",
   "changelog": "Initial release - 3-layer ad blocking with MAIN world injection"
