@@ -471,6 +471,23 @@
         '  display: none !important;\n' +
         '}\n' +
         '\n' +
+        '/* Hide sponsored/promoted ads in feed and search (2024-2025) */\n' +
+        'ytd-ad-slot-renderer,\n' +
+        'ytd-in-feed-ad-layout-renderer,\n' +
+        '#masthead-ad,\n' +
+        '#player-ads,\n' +
+        'ytd-rich-item-renderer:has(.ytd-display-ad-renderer),\n' +
+        'ytd-rich-item-renderer:has(ytd-ad-slot-renderer),\n' +
+        '#related ytd-ad-slot-renderer,\n' +
+        'ytd-search ytd-ad-slot-renderer,\n' +
+        'ytd-merch-shelf-renderer,\n' +
+        'ytd-brand-video-singleton-renderer,\n' +
+        'ytd-brand-video-shelf-renderer,\n' +
+        'ytd-statement-banner-renderer,\n' +
+        'ytd-primetime-promo-renderer {\n' +
+        '  display: none !important;\n' +
+        '}\n' +
+        '\n' +
         '/* Hide skip ad button container */\n' +
         '.ytp-ad-skip-button-container {\n' +
         '  display: none !important;\n' +
