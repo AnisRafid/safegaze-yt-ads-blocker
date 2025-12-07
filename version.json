@@ -1,8 +1,8 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "scriptUrl": "https://raw.githubusercontent.com/AnisRafid/safegaze-yt-ads-blocker/main/youtube-ads-blocker.js",
-  "sha256": "a96389ce0e2460804db955592afc746d364030adcc8821087049bc68fbd88823",
+  "sha256": "8d3257c0325d1eb4936d1b76c260f3ba066d9cc0b5578b4985e47c296c0c032f",
   "minExtensionVersion": "3.4.0",
   "updatedAt": "2025-12-07T00:00:00Z",
-  "changelog": "Added CSS selectors to block sponsored ads in home page and search feed"
+  "changelog": "Fixed: CSS now injects immediately on ALL YouTube pages (home, search, feed) instead of only on watch pages"
 }
