@@ -1,5 +1,6 @@
 /**
  * SafeGaze YouTube Ads Blocker - Standalone Script
+ * Version: 1.4.0
  *
  * Cross-platform compatible script for blocking YouTube ads.
  * Can be used in:
@@ -20,6 +21,74 @@
     return;
   }
   window.__SAFEGAZE_YT_AD_BLOCKER_INITIALIZED__ = true;
+
+  // =============================================================================
+  // IMMEDIATE CSS INJECTION (runs on ALL YouTube pages - home, search, watch, etc.)
+  // This ensures feed/search ads are hidden even before Layer 3 initializes
+  // =============================================================================
+  (function injectFeedAdBlockingCSS() {
+    var existingStyle = document.getElementById('sg-youtube-ad-blocker-styles');
+    if (existingStyle) return;
+
+    var style = document.createElement('style');
+    style.id = 'sg-youtube-ad-blocker-styles';
+    style.textContent =
+      '/* Hide YouTube ad renderers (feed, search, sidebar) */\n' +
+      'ytd-display-ad-renderer,\n' +
+      'ytd-video-masthead-ad-v3-renderer,\n' +
+      'ytd-promoted-sparkles-web-renderer,\n' +
+      'ytd-compact-promoted-video-renderer,\n' +
+      'ytd-promoted-video-renderer,\n' +
+      'ytd-banner-promo-renderer,\n' +
+      'ytd-action-companion-ad-renderer,\n' +
+      'ytd-ad-slot-renderer,\n' +
+      'ytd-in-feed-ad-layout-renderer,\n' +
+      '#masthead-ad,\n' +
+      '#player-ads,\n' +
+      'ytd-rich-item-renderer:has(.ytd-display-ad-renderer),\n' +
+      'ytd-rich-item-renderer:has(ytd-ad-slot-renderer),\n' +
+      'ytd-rich-item-renderer:has(ytd-in-feed-ad-layout-renderer),\n' +
+      '#related ytd-ad-slot-renderer,\n' +
+      'ytd-search ytd-ad-slot-renderer,\n' +
+      'ytd-merch-shelf-renderer,\n' +
+      'ytd-brand-video-singleton-renderer,\n' +
+      'ytd-brand-video-shelf-renderer,\n' +
+      'ytd-statement-banner-renderer,\n' +
+      'ytd-primetime-promo-renderer,\n' +
+      '.ytd-promoted-sparkles-web-renderer,\n' +
+      'ytd-movie-offer-module-renderer,\n' +
+      'ytd-companion-slot-renderer,\n' +
+      'ytd-promoted-sparkles-text-search-renderer,\n' +
+      'ytd-search-pyv-renderer,\n' +
+      'ytd-carousel-ad-renderer,\n' +
+      'ytd-player-legacy-desktop-watch-ads-renderer,\n' +
+      'ytd-single-option-survey-renderer,\n' +
+      '.ytd-promoted-sparkles-text-search-renderer,\n' +
+      '.ytd-search-pyv-renderer,\n' +
+      '.ytd-carousel-ad-renderer,\n' +
+      '.ytd-player-legacy-desktop-watch-ads-renderer,\n' +
+      '.ytd-video-masthead-ad-v3-renderer,\n' +
+      '.ytd-compact-promoted-video-renderer,\n' +
+      '.ytd-promoted-video-renderer,\n' +
+      '.ytd-merch-shelf-renderer {\n' +
+      '  display: none !important;\n' +
+      '  visibility: hidden !important;\n' +
+      '  height: 0 !important;\n' +
+      '  overflow: hidden !important;\n' +
+      '}\n' +
+      '\n' +
+      '/* Hide ad overlay elements */\n' +
+      '.ytp-ad-overlay-container,\n' +
+      '.ytp-ad-text-overlay,\n' +
+      '.ytp-ad-image-overlay {\n' +
+      '  display: none !important;\n' +
+      '}';
+
+    var target = document.head || document.documentElement;
+    if (target) {
+      target.appendChild(style);
+    }
+  })();
 
   // =============================================================================
   // LAYER 2: BLOCKED URL PATTERNS
@@ -246,6 +315,7 @@
   // =============================================================================
   // LAYER 3: DOM-BASED FALLBACK
   // Detects and skips ads that slip through Layer 1-2
+  // IMPORTANT: Only activates when CONFIDENT an ad is playing
   // =============================================================================
 
   var YouTubeAdSkipper = {
@@ -254,6 +324,8 @@
     isInitialized: false,
     lastAdState: false,
     userWasMuted: false,
+    userPlaybackRate: 1,
+    consecutiveAdDetections: 0, // Require multiple detections to confirm ad
 
     /**
      * Initialize ad skipper
@@ -261,9 +333,6 @@
     init: function() {
       var self = this;
       if (this.isInitialized) return;
-
-      // Inject CSS for ad hiding
-      this.injectAdBlockingCSS();
 
       // Wait for player then start detection
       this.waitForPlayer().then(function() {
@@ -282,12 +351,12 @@
       return new Promise(function(resolve) {
         function checkPlayer() {
           var moviePlayer = document.getElementById('movie_player');
-          var video = document.querySelector('.video-stream');
+          var video = document.querySelector('video.video-stream');
 
           if (moviePlayer && video) {
             resolve();
           } else {
-            setTimeout(checkPlayer, 100);
+            setTimeout(checkPlayer, 200);
           }
         }
 
@@ -315,108 +384,154 @@
         });
       }
 
-      // Backup polling every 100ms for reliability
+      // Backup polling every 500ms (less aggressive)
       this.checkInterval = setInterval(function() {
         self.handleAdDetection();
-      }, 100);
+      }, 500);
+    },
+
+    /**
+     * Check if we're CONFIDENTLY in an ad state
+     * Requires the movie_player to have ad-showing class (most reliable indicator)
+     */
+    isDefinitelyInAd: function() {
+      var moviePlayer = document.getElementById('movie_player');
+      if (!moviePlayer) return false;
+
+      // Primary check: movie_player must have ad-showing or ad-interrupting class
+      var hasAdClass = moviePlayer.classList.contains('ad-showing') ||
+                       moviePlayer.classList.contains('ad-interrupting');
+
+      if (!hasAdClass) return false;
+
+      // Secondary confirmation: check for ad-specific elements
+      var hasAdOverlay = document.querySelector('.ytp-ad-player-overlay') !== null;
+      var hasAdModule = document.querySelector('.video-ads.ytp-ad-module') !== null;
+      var hasAdPreview = document.querySelector('.ytp-ad-preview-container') !== null;
+      var hasAdText = document.querySelector('.ytp-ad-text') !== null;
+
+      // Must have ad class AND at least one ad element
+      return hasAdClass && (hasAdOverlay || hasAdModule || hasAdPreview || hasAdText);
     },
 
     /**
      * Layer 3: Fallback ad detection and skipping
      * Only triggers if ads slip through Layers 1-2 (should be rare)
-     * More aggressive detection and immediate skipping
+     * Uses conservative detection to avoid false positives
      */
     handleAdDetection: function() {
-      var video = document.querySelector('.video-stream');
+      var video = document.querySelector('video.video-stream');
       var moviePlayer = document.getElementById('movie_player');
 
       if (!video || !moviePlayer) return;
 
-      // Multi-signal ad detection (more comprehensive)
-      var isNowInAd = (moviePlayer && (
-          moviePlayer.classList.contains('ad-showing') ||
-          moviePlayer.classList.contains('ad-interrupting')
-        )) ||
-        document.querySelector('.ytp-ad-player-overlay') !== null ||
-        document.querySelector('.video-ads.ytp-ad-module') !== null ||
-        document.querySelector('.ytp-ad-text') !== null;
-
+      var isNowInAd = this.isDefinitelyInAd();
       var wasInAd = this.lastAdState;
 
-      // STATE TRANSITION: Entering ad state (fallback - should be rare with MAIN world script)
+      // STATE TRANSITION: Entering ad state
       if (isNowInAd && !wasInAd) {
-        // Save user's mute preference
-        this.userWasMuted = video.muted;
-
-        // Mute immediately
-        video.muted = true;
-
-        // Skip to end IMMEDIATELY (most aggressive)
-        if (video.duration && !isNaN(video.duration)) {
-          video.currentTime = video.duration;
+        // Require 2 consecutive detections to confirm (avoid false positives)
+        this.consecutiveAdDetections++;
+        if (this.consecutiveAdDetections < 2) {
+          return;
         }
 
-        // Also try speed-up as backup
-        video.playbackRate = 16;
+        console.log('[SafeGaze] Ad detected, attempting to skip...');
 
-        // Click skip buttons
-        this.clickSkipButton();
-        this.removeAdOverlays();
+        // Save user's preferences
+        this.userWasMuted = video.muted;
+        this.userPlaybackRate = video.playbackRate;
+
+        // Mute the ad
+        video.muted = true;
+
+        // Try to skip - but be careful not to skip actual content
+        this.trySkipAd(video);
       }
 
       // STATE TRANSITION: Exiting ad state
       if (!isNowInAd && wasInAd) {
-        // Restore user's original mute preference
+        console.log('[SafeGaze] Ad ended, restoring playback...');
+
+        // Reset detection counter
+        this.consecutiveAdDetections = 0;
+
+        // Restore user's original preferences
         video.muted = this.userWasMuted;
+        video.playbackRate = this.userPlaybackRate;
 
-        // Reset playback speed
-        video.playbackRate = 1;
-
-        // Auto-resume playback
+        // Auto-resume playback if paused
         setTimeout(function() {
           if (video.paused) {
             video.play().catch(function() {
               // Ignore autoplay errors
             });
           }
-        }, 50);
+        }, 100);
       }
 
-      // When STAYING in ad state, continuously try to skip
+      // While IN ad state, keep trying to skip
       if (isNowInAd && wasInAd) {
-        // Keep jumping to end
-        if (video.duration && !isNaN(video.duration)) {
-          if (video.currentTime < video.duration - 0.3) {
-            video.currentTime = video.duration;
-          }
-        }
-        this.clickSkipButton();
-        this.removeAdOverlays();
+        this.trySkipAd(video);
       }
 
-      // When STAYING in content state - DO NOTHING (respect user controls)
+      // Reset counter if not in ad
+      if (!isNowInAd) {
+        this.consecutiveAdDetections = 0;
+      }
 
       // Update state for next check
       this.lastAdState = isNowInAd;
     },
 
     /**
+     * Try to skip the ad using various methods
+     */
+    trySkipAd: function(video) {
+      // Method 1: Click skip button if available
+      if (this.clickSkipButton()) {
+        return;
+      }
+
+      // Method 2: Speed up the ad (safer than jumping to end)
+      if (video.playbackRate < 16) {
+        video.playbackRate = 16;
+      }
+
+      // Method 3: If ad is very short or near end, skip to end
+      if (video.duration && !isNaN(video.duration) && video.duration < 30) {
+        // Only skip short ads (< 30 seconds) to avoid skipping actual content
+        if (video.currentTime < video.duration - 0.5) {
+          video.currentTime = video.duration - 0.1;
+        }
+      }
+
+      // Remove overlay ads
+      this.removeAdOverlays();
+    },
+
+    /**
      * Click skip ad button
+     * Returns true if a button was clicked
      */
     clickSkipButton: function() {
       var skipSelectors = [
         '.ytp-ad-skip-button',
         '.ytp-ad-skip-button-modern',
-        '.ytp-skip-ad-button'
+        '.ytp-skip-ad-button',
+        'button.ytp-ad-skip-button-modern',
+        '.ytp-ad-skip-button-slot button'
       ];
 
       for (var i = 0; i < skipSelectors.length; i++) {
         var button = document.querySelector(skipSelectors[i]);
         if (button && button.offsetParent !== null) {
           button.click();
-          break;
+          console.log('[SafeGaze] Clicked skip button');
+          return true;
         }
       }
+      return false;
     },
 
     /**
@@ -440,69 +555,31 @@
     },
 
     /**
-     * Inject CSS for ad hiding
-     */
-    injectAdBlockingCSS: function() {
-      var existingStyle = document.getElementById('sg-youtube-ad-skipper-styles');
-      if (existingStyle) return;
-
-      var style = document.createElement('style');
-      style.id = 'sg-youtube-ad-skipper-styles';
-      style.textContent =
-        '/* Hide ad-related elements */\n' +
-        '.ad-showing .video-ads,\n' +
-        '.ad-showing .ytp-ad-module,\n' +
-        '.ad-showing .ytp-ad-player-overlay,\n' +
-        '.ad-interrupting .video-ads,\n' +
-        '.ad-interrupting .ytp-ad-module,\n' +
-        '.ad-interrupting .ytp-ad-player-overlay {\n' +
-        '  display: none !important;\n' +
-        '  visibility: hidden !important;\n' +
-        '}\n' +
-        '\n' +
-        '/* Hide YouTube ad renderers */\n' +
-        'ytd-display-ad-renderer,\n' +
-        'ytd-video-masthead-ad-v3-renderer,\n' +
-        'ytd-promoted-sparkles-web-renderer,\n' +
-        'ytd-compact-promoted-video-renderer,\n' +
-        'ytd-promoted-video-renderer,\n' +
-        'ytd-banner-promo-renderer,\n' +
-        'ytd-action-companion-ad-renderer {\n' +
-        '  display: none !important;\n' +
-        '}\n' +
-        '\n' +
-        '/* Hide skip ad button container */\n' +
-        '.ytp-ad-skip-button-container {\n' +
-        '  display: none !important;\n' +
-        '}';
-
-      // Append to head or documentElement (for early injection)
-      var target = document.head || document.documentElement;
-      if (target) {
-        target.appendChild(style);
-      }
-    },
-
-    /**
      * Observe YouTube SPA navigation
      */
     observeYouTubeNavigation: function() {
       var self = this;
 
       window.addEventListener('yt-navigate-finish', function() {
+        // Reset state on navigation
+        self.cleanup();
+        self.isInitialized = false;
+        self.lastAdState = false;
+        self.consecutiveAdDetections = 0;
+
+        // Re-initialize if on watch page
         if (self.isWatchPage()) {
-          self.cleanup();
-          self.isInitialized = false;
-          self.lastAdState = false; // Reset state for new video
           self.init();
         }
       });
 
       window.addEventListener('popstate', function() {
+        self.cleanup();
+        self.isInitialized = false;
+        self.lastAdState = false;
+        self.consecutiveAdDetections = 0;
+
         if (self.isWatchPage()) {
-          self.cleanup();
-          self.isInitialized = false;
-          self.lastAdState = false; // Reset state for new video
           self.init();
         }
       });
@@ -545,17 +622,24 @@
 
   // Only run on YouTube domains
   if (window.location.hostname.indexOf('youtube.com') !== -1) {
-    // Initialize Layer 3 (DOM-based fallback)
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', function() {
+    // Initialize Layer 3 (DOM-based fallback) only on watch pages
+    if (YouTubeAdSkipper.isWatchPage()) {
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+          YouTubeAdSkipper.init();
+        });
+      } else {
         YouTubeAdSkipper.init();
-      });
-    } else {
-      YouTubeAdSkipper.init();
+      }
     }
+
+    // Listen for future navigations to watch pages
+    YouTubeAdSkipper.observeYouTubeNavigation();
   }
 
-  // Expose for debugging (optional - remove in production if desired)
+  // Expose for debugging
   window.__SAFEGAZE_YT_AD_SKIPPER__ = YouTubeAdSkipper;
+
+  console.log('[SafeGaze] YouTube Ads Blocker v1.4.0 initialized');
 
 })();

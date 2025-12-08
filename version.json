@@ -1,8 +1,8 @@
 {
-  "version": "1.3.0",
+  "version": "1.4.0",
   "scriptUrl": "https://raw.githubusercontent.com/AnisRafid/safegaze-yt-ads-blocker/main/youtube-ads-blocker.js",
-  "sha256": "f7e4b92a3aed29845013db8a5dbe376a8f048b657e3f856d049440e7656a08b1",
+  "sha256": "9d1f3fb97478fac71f89f4cd61f5b1e234fc7cac47678a46c554a636bb31adc6",
   "minExtensionVersion": "3.4.0",
-  "updatedAt": "2025-12-08T00:00:00Z",
-  "changelog": "Added missing selectors for search ads (ytd-promoted-sparkles-text-search-renderer, ytd-search-pyv-renderer), carousel ads, legacy player ads, survey ads, and interstitial containers"
+  "updatedAt": "2025-12-08T08:00:00Z",
+  "changelog": "Fixed false positive ad detection that caused videos to skip. Added conservative detection requiring multiple confirmations. Only skips ads < 30 seconds to avoid skipping actual content."
 }
