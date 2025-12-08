@@ -75,81 +75,6 @@
   window.SAFEGAZE_BLOCKED_AD_PATTERNS = BLOCKED_AD_PATTERNS;
 
   // =============================================================================
-  // IMMEDIATE CSS INJECTION (runs on ALL YouTube pages - home, search, watch, etc.)
-  // This ensures feed/search ads are hidden even before Layer 3 initializes
-  // =============================================================================
-  (function injectFeedAdBlockingCSS() {
-    var existingStyle = document.getElementById('sg-youtube-ad-blocker-styles');
-    if (existingStyle) return;
-
-    var style = document.createElement('style');
-    style.id = 'sg-youtube-ad-blocker-styles';
-    style.textContent =
-      '/* Hide YouTube ad renderers (feed, search, sidebar) */\n' +
-      'ytd-display-ad-renderer,\n' +
-      'ytd-video-masthead-ad-v3-renderer,\n' +
-      'ytd-promoted-sparkles-web-renderer,\n' +
-      'ytd-compact-promoted-video-renderer,\n' +
-      'ytd-promoted-video-renderer,\n' +
-      'ytd-banner-promo-renderer,\n' +
-      'ytd-action-companion-ad-renderer,\n' +
-      'ytd-ad-slot-renderer,\n' +
-      'ytd-in-feed-ad-layout-renderer,\n' +
-      '#masthead-ad,\n' +
-      '#player-ads,\n' +
-      'ytd-rich-item-renderer:has(.ytd-display-ad-renderer),\n' +
-      'ytd-rich-item-renderer:has(ytd-ad-slot-renderer),\n' +
-      'ytd-rich-item-renderer:has(ytd-in-feed-ad-layout-renderer),\n' +
-      '#related ytd-ad-slot-renderer,\n' +
-      'ytd-search ytd-ad-slot-renderer,\n' +
-      'ytd-merch-shelf-renderer,\n' +
-      'ytd-brand-video-singleton-renderer,\n' +
-      'ytd-brand-video-shelf-renderer,\n' +
-      'ytd-statement-banner-renderer,\n' +
-      'ytd-primetime-promo-renderer,\n' +
-      '.ytd-promoted-sparkles-web-renderer,\n' +
-      'ytd-movie-offer-module-renderer,\n' +
-      'ytd-companion-slot-renderer,\n' +
-      'ytd-promoted-sparkles-text-search-renderer,\n' +
-      'ytd-search-pyv-renderer,\n' +
-      'ytd-carousel-ad-renderer,\n' +
-      'ytd-player-legacy-desktop-watch-ads-renderer,\n' +
-      'ytd-single-option-survey-renderer,\n' +
-      '.ytd-promoted-sparkles-text-search-renderer,\n' +
-      '.ytd-search-pyv-renderer,\n' +
-      '.ytd-carousel-ad-renderer,\n' +
-      '.ytd-player-legacy-desktop-watch-ads-renderer,\n' +
-      '.ytd-video-masthead-ad-v3-renderer,\n' +
-      '.ytd-compact-promoted-video-renderer,\n' +
-      '.ytd-promoted-video-renderer,\n' +
-      '.ytd-merch-shelf-renderer {\n' +
-      '  display: none !important;\n' +
-      '  visibility: hidden !important;\n' +
-      '  height: 0 !important;\n' +
-      '  overflow: hidden !important;\n' +
-      '}\n' +
-      '\n' +
-      '/* Hide ad-related elements during video playback */\n' +
-      '.ad-showing .video-ads,\n' +
-      '.ad-showing .ytp-ad-module,\n' +
-      '.ad-showing .ytp-ad-player-overlay,\n' +
-      '.ad-interrupting .video-ads,\n' +
-      '.ad-interrupting .ytp-ad-module,\n' +
-      '.ad-interrupting .ytp-ad-player-overlay,\n' +
-      '.ytp-ad-skip-button-container,\n' +
-      '.ytp-ad-action-interstitial-background-container,\n' +
-      '.ytp-ad-action-interstitial-slot {\n' +
-      '  display: none !important;\n' +
-      '  visibility: hidden !important;\n' +
-      '}';
-
-    var target = document.head || document.documentElement;
-    if (target) {
-      target.appendChild(style);
-    }
-  })();
-
-  // =============================================================================
   // LAYER 1: PLAYER DATA INTERCEPTION
   // Intercepts YouTube's player data to remove ads before they load
   // =============================================================================
@@ -542,49 +467,12 @@
         'ytd-compact-promoted-video-renderer,\n' +
         'ytd-promoted-video-renderer,\n' +
         'ytd-banner-promo-renderer,\n' +
-        'ytd-action-companion-ad-renderer,\n' +
-        'ytd-promoted-sparkles-text-search-renderer,\n' +
-        'ytd-search-pyv-renderer,\n' +
-        'ytd-carousel-ad-renderer,\n' +
-        'ytd-player-legacy-desktop-watch-ads-renderer,\n' +
-        'ytd-single-option-survey-renderer {\n' +
+        'ytd-action-companion-ad-renderer {\n' +
         '  display: none !important;\n' +
         '}\n' +
         '\n' +
-        '/* Hide sponsored/promoted ads in feed and search (2024-2025) */\n' +
-        'ytd-ad-slot-renderer,\n' +
-        'ytd-in-feed-ad-layout-renderer,\n' +
-        '#masthead-ad,\n' +
-        '#player-ads,\n' +
-        'ytd-rich-item-renderer:has(.ytd-display-ad-renderer),\n' +
-        'ytd-rich-item-renderer:has(ytd-ad-slot-renderer),\n' +
-        'ytd-rich-item-renderer:has(ytd-in-feed-ad-layout-renderer),\n' +
-        '#related ytd-ad-slot-renderer,\n' +
-        'ytd-search ytd-ad-slot-renderer,\n' +
-        'ytd-merch-shelf-renderer,\n' +
-        'ytd-brand-video-singleton-renderer,\n' +
-        'ytd-brand-video-shelf-renderer,\n' +
-        'ytd-statement-banner-renderer,\n' +
-        'ytd-primetime-promo-renderer {\n' +
-        '  display: none !important;\n' +
-        '}\n' +
-        '\n' +
-        '/* Hide class-based ad selectors */\n' +
-        '.ytd-promoted-sparkles-text-search-renderer,\n' +
-        '.ytd-search-pyv-renderer,\n' +
-        '.ytd-carousel-ad-renderer,\n' +
-        '.ytd-player-legacy-desktop-watch-ads-renderer,\n' +
-        '.ytd-video-masthead-ad-v3-renderer,\n' +
-        '.ytd-compact-promoted-video-renderer,\n' +
-        '.ytd-promoted-video-renderer,\n' +
-        '.ytd-merch-shelf-renderer {\n' +
-        '  display: none !important;\n' +
-        '}\n' +
-        '\n' +
-        '/* Hide skip ad button and interstitial containers */\n' +
-        '.ytp-ad-skip-button-container,\n' +
-        '.ytp-ad-action-interstitial-background-container,\n' +
-        '.ytp-ad-action-interstitial-slot {\n' +
+        '/* Hide skip ad button container */\n' +
+        '.ytp-ad-skip-button-container {\n' +
         '  display: none !important;\n' +
         '}';
 
@@ -602,10 +490,6 @@
       var self = this;
 
       window.addEventListener('yt-navigate-finish', function() {
-        // Always ensure CSS is present on ANY page (home, search, watch, etc.)
-        self.ensureCSSInjected();
-
-        // Only setup video ad detection on watch pages
         if (self.isWatchPage()) {
           self.cleanup();
           self.isInitialized = false;
@@ -615,9 +499,6 @@
       });
 
       window.addEventListener('popstate', function() {
-        // Always ensure CSS is present
-        self.ensureCSSInjected();
-
         if (self.isWatchPage()) {
           self.cleanup();
           self.isInitialized = false;
@@ -625,39 +506,6 @@
           self.init();
         }
       });
-    },
-
-    /**
-     * Ensure CSS is injected (re-inject if YouTube removed it)
-     */
-    ensureCSSInjected: function() {
-      var existingStyle = document.getElementById('sg-youtube-ad-blocker-styles');
-      if (!existingStyle) {
-        // Re-inject the immediate CSS if missing
-        var style = document.createElement('style');
-        style.id = 'sg-youtube-ad-blocker-styles';
-        style.textContent =
-          'ytd-display-ad-renderer,ytd-video-masthead-ad-v3-renderer,ytd-promoted-sparkles-web-renderer,' +
-          'ytd-compact-promoted-video-renderer,ytd-promoted-video-renderer,ytd-banner-promo-renderer,' +
-          'ytd-action-companion-ad-renderer,ytd-ad-slot-renderer,ytd-in-feed-ad-layout-renderer,' +
-          '#masthead-ad,#player-ads,ytd-rich-item-renderer:has(.ytd-display-ad-renderer),' +
-          'ytd-rich-item-renderer:has(ytd-ad-slot-renderer),ytd-rich-item-renderer:has(ytd-in-feed-ad-layout-renderer),' +
-          '#related ytd-ad-slot-renderer,ytd-search ytd-ad-slot-renderer,ytd-merch-shelf-renderer,' +
-          'ytd-brand-video-singleton-renderer,ytd-brand-video-shelf-renderer,ytd-statement-banner-renderer,' +
-          'ytd-primetime-promo-renderer,.ytd-promoted-sparkles-web-renderer,ytd-movie-offer-module-renderer,' +
-          'ytd-companion-slot-renderer,ytd-promoted-sparkles-text-search-renderer,ytd-search-pyv-renderer,' +
-          'ytd-carousel-ad-renderer,ytd-player-legacy-desktop-watch-ads-renderer,ytd-single-option-survey-renderer,' +
-          '.ytd-promoted-sparkles-text-search-renderer,.ytd-search-pyv-renderer,.ytd-carousel-ad-renderer,' +
-          '.ytd-player-legacy-desktop-watch-ads-renderer,.ytd-video-masthead-ad-v3-renderer,' +
-          '.ytd-compact-promoted-video-renderer,.ytd-promoted-video-renderer,.ytd-merch-shelf-renderer{' +
-          'display:none!important;visibility:hidden!important;height:0!important;overflow:hidden!important}' +
-          '.ad-showing .video-ads,.ad-showing .ytp-ad-module,.ad-showing .ytp-ad-player-overlay,' +
-          '.ad-interrupting .video-ads,.ad-interrupting .ytp-ad-module,.ad-interrupting .ytp-ad-player-overlay,' +
-          '.ytp-ad-skip-button-container,.ytp-ad-action-interstitial-background-container,' +
-          '.ytp-ad-action-interstitial-slot{display:none!important;visibility:hidden!important}';
-        var target = document.head || document.documentElement;
-        if (target) target.appendChild(style);
-      }
     },
 
     /**
