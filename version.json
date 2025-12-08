@@ -1,8 +1,8 @@
 {
-  "version": "1.2.0",
+  "version": "1.3.0",
   "scriptUrl": "https://raw.githubusercontent.com/AnisRafid/safegaze-yt-ads-blocker/main/youtube-ads-blocker.js",
-  "sha256": "8d3257c0325d1eb4936d1b76c260f3ba066d9cc0b5578b4985e47c296c0c032f",
+  "sha256": "f7e4b92a3aed29845013db8a5dbe376a8f048b657e3f856d049440e7656a08b1",
   "minExtensionVersion": "3.4.0",
-  "updatedAt": "2025-12-07T00:00:00Z",
-  "changelog": "Fixed: CSS now injects immediately on ALL YouTube pages (home, search, feed) instead of only on watch pages"
+  "updatedAt": "2025-12-08T00:00:00Z",
+  "changelog": "Added missing selectors for search ads (ytd-promoted-sparkles-text-search-renderer, ytd-search-pyv-renderer), carousel ads, legacy player ads, survey ads, and interstitial containers"
 }
