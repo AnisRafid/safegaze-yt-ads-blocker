@@ -1,5 +1,5 @@
 /**
- * SafeGaze YouTube Ads Blocker - Standalone Script v1.2.0
+ * SafeGaze YouTube Ads Blocker - Standalone Script
  *
  * Cross-platform compatible script for blocking YouTube ads.
  * Can be used in:
@@ -7,18 +7,10 @@
  * - Android WebView
  * - iOS WKWebView
  *
- * This script combines four layers of ad blocking:
- * - Layer 1: Player data interception (ytInitialPlayerResponse, JSON.parse, Response.json, fetch, XHR hooks)
+ * This script combines three layers of ad blocking:
+ * - Layer 1: Player data interception (ytInitialPlayerResponse, fetch, XHR hooks)
  * - Layer 2: Blocked URL patterns (for mobile network-level blocking)
  * - Layer 3: DOM-based fallback (ad detection, skip buttons, overlay removal)
- * - Layer 4: Embed fallback (youtube-nocookie.com replacement for persistent ads)
- *
- * Updated: December 2025
- * - Added JSON.parse and Response.prototype.json hooks for desktop SSAI
- * - Recursive ad property removal at any nesting depth
- * - Enhanced 2024/2025 desktop ad detection selectors
- * - Tiered embed fallback (500ms aggressive skip, 1500ms embed)
- * - Improved skip button detection and clicking
  */
 (function() {
   'use strict';
@@ -85,77 +77,11 @@
   // =============================================================================
   // LAYER 1: PLAYER DATA INTERCEPTION
   // Intercepts YouTube's player data to remove ads before they load
-  // Enhanced with JSON.parse and Response.json hooks for desktop SSAI (December 2025)
   // =============================================================================
 
   /**
-   * Core ad properties to remove (only the essential ones)
-   * Keeping this minimal to avoid breaking video playback
-   */
-  var AD_PROPERTIES = [
-    'playerAds',
-    'adPlacements',
-    'adSlots',
-    'ads',
-    'adBreakParams'
-  ];
-
-  /**
-   * Recursively override a property in an object tree
-   * Based on AdGuard's BlockYouTubeAdsShortcut approach for handling SSAI
-   * Only targets known ad-related properties to avoid breaking video playback
-   * @param {Object} obj - The object to search
-   * @param {string} propertyName - The property name to override
-   * @param {*} overrideValue - The value to set (usually [] or null)
-   * @param {number} depth - Current recursion depth (max 10 to prevent infinite loops)
-   * @returns {boolean} Whether any property was overridden
-   */
-  function overrideObject(obj, propertyName, overrideValue, depth) {
-    if (!obj || typeof obj !== 'object') {
-      return false;
-    }
-
-    // Limit recursion depth to prevent performance issues
-    depth = depth || 0;
-    if (depth > 10) {
-      return false;
-    }
-
-    var overridden = false;
-
-    // Handle arrays
-    if (Array.isArray(obj)) {
-      for (var i = 0; i < obj.length; i++) {
-        if (typeof obj[i] === 'object' && obj[i] !== null) {
-          if (overrideObject(obj[i], propertyName, overrideValue, depth + 1)) {
-            overridden = true;
-          }
-        }
-      }
-      return overridden;
-    }
-
-    // Handle objects
-    for (var key in obj) {
-      if (obj.hasOwnProperty(key)) {
-        if (key === propertyName) {
-          obj[key] = overrideValue;
-          overridden = true;
-        } else if (typeof obj[key] === 'object' && obj[key] !== null) {
-          if (overrideObject(obj[key], propertyName, overrideValue, depth + 1)) {
-            overridden = true;
-          }
-        }
-      }
-    }
-
-    return overridden;
-  }
-
-  /**
    * Remove ad-related properties from YouTube player data
-   * Uses recursive override to find ad properties at any nesting depth
-   * This is critical for handling YouTube's Server-Side Ad Injection (SSAI)
+   * Modifies objects in-place to preserve object types and avoid cloning overhead
    * @param {Object} data - The data object to clean
    * @returns {Object} The cleaned data object
    */
@@ -164,13 +90,37 @@
       return data;
     }
 
-    // Use recursive override for thorough ad removal (handles SSAI)
-    overrideObject(data, 'playerAds', []);
-    overrideObject(data, 'adPlacements', []);
-    overrideObject(data, 'adSlots', []);
-    overrideObject(data, 'ads', []);
-    overrideObject(data, 'adBreakParams', null);
+    // Only remove confirmed ad-related properties
+    var adProps = [
+      'playerAds',
+      'adPlacements',
+      'adSlots',
+      'ads',
+      'adBreakParams',
+      'companions'
+    ];
 
+    function cleanObject(obj) {
+      if (!obj || typeof obj !== 'object') return;
+
+      // Remove ad properties directly (no cloning)
+      for (var i = 0; i < adProps.length; i++) {
+        if (obj.hasOwnProperty(adProps[i])) {
+          delete obj[adProps[i]];
+        }
+      }
+
+      // Recursively clean nested objects
+      var keys = Object.keys(obj);
+      for (var j = 0; j < keys.length; j++) {
+        var key = keys[j];
+        if (obj[key] && typeof obj[key] === 'object') {
+          cleanObject(obj[key]);
+        }
+      }
+    }
+
+    cleanObject(data);
     return data;
   }
 
@@ -190,59 +140,6 @@
     });
   } catch (error) {
     console.error('[SafeGaze] Failed to hook ytInitialPlayerResponse:', error);
-  }
-
-  // Layer 1A-2: Intercept JSON.parse (critical for desktop SSAI)
-  // Desktop YouTube uses JSON.parse() directly on inline scripts containing player data
-  try {
-    var nativeJSONParse = JSON.parse;
-    JSON.parse = function() {
-      var obj = nativeJSONParse.apply(this, arguments);
-      // Only process objects (skip strings, numbers, etc.)
-      if (obj && typeof obj === 'object') {
-        // Check if this looks like YouTube player data before processing
-        // This avoids unnecessary processing of non-YouTube JSON
-        if (obj.playerResponse || obj.adPlacements || obj.playerAds || obj.contents) {
-          overrideObject(obj, 'adPlacements', []);
-          overrideObject(obj, 'playerAds', []);
-          overrideObject(obj, 'adSlots', []);
-          overrideObject(obj, 'ads', []);
-          overrideObject(obj, 'adBreakParams', null);
-        }
-      }
-      return obj;
-    };
-  } catch (error) {
-    console.error('[SafeGaze] Failed to hook JSON.parse:', error);
-  }
-
-  // Layer 1A-3: Intercept Response.prototype.json (for API responses)
-  // Desktop YouTube's fetch responses use .json() method which bypasses fetch() hook
-  try {
-    var nativeResponseJson = Response.prototype.json;
-    Response.prototype.json = new Proxy(nativeResponseJson, {
-      apply: function(target, thisArg, argumentsList) {
-        var promise = Reflect.apply(target, thisArg, argumentsList);
-        return promise.then(function(data) {
-          if (data && typeof data === 'object') {
-            // Check if this looks like YouTube player data
-            if (data.playerResponse || data.adPlacements || data.playerAds || data.contents) {
-              overrideObject(data, 'adPlacements', []);
-              overrideObject(data, 'playerAds', []);
-              overrideObject(data, 'adSlots', []);
-              overrideObject(data, 'ads', []);
-              overrideObject(data, 'adBreakParams', null);
-            }
-          }
-          return data;
-        }).catch(function(error) {
-          // Re-throw to maintain original error behavior
-          throw error;
-        });
-      }
-    });
-  } catch (error) {
-    console.error('[SafeGaze] Failed to hook Response.prototype.json:', error);
   }
 
   // Layer 1B: Intercept fetch() API (dynamic requests)
@@ -265,15 +162,8 @@
           return response;
         }
 
-        // Intercept player API and browse API (for home page ads)
-        // Skip /next (comments) to avoid breaking comment section
-        var shouldIntercept = url && (
-          (url.indexOf('/youtubei/v1/player') !== -1 && url.indexOf('/next') === -1) ||
-          (url.indexOf('/youtubei/v1/browse') !== -1) ||
-          (url.indexOf('/get_video_info') !== -1)
-        );
-
-        if (shouldIntercept) {
+        // Only intercept player API, NOT comments (/next) or navigation
+        if (url && url.indexOf('/youtubei/v1/player') !== -1 && url.indexOf('/next') === -1) {
           // Clone response to read it
           var cloned = response.clone();
           return cloned.text().then(function(text) {
@@ -326,14 +216,8 @@
       var url = this._sgUrl || '';
       var args = arguments;
 
-      // Intercept player API and browse API, skip /next (comments)
-      var shouldIntercept = (
-        (url.indexOf('/youtubei/v1/player') !== -1 && url.indexOf('/next') === -1) ||
-        (url.indexOf('/youtubei/v1/browse') !== -1) ||
-        (url.indexOf('/get_video_info') !== -1)
-      );
-
-      if (shouldIntercept) {
+      // CRITICAL: Only intercept player API, NOT comments (/next) or navigation
+      if (url.indexOf('/youtubei/v1/player') !== -1 && url.indexOf('/next') === -1) {
         this.addEventListener('readystatechange', function() {
           if (self.readyState === 4 && self.responseText) {
             try {
@@ -360,9 +244,8 @@
   }
 
   // =============================================================================
-  // LAYER 3 & 4: DOM-BASED FALLBACK + EMBED REPLACEMENT
+  // LAYER 3: DOM-BASED FALLBACK
   // Detects and skips ads that slip through Layer 1-2
-  // Falls back to embed replacement for server-side injected ads
   // =============================================================================
 
   var YouTubeAdSkipper = {
@@ -371,11 +254,6 @@
     isInitialized: false,
     lastAdState: false,
     userWasMuted: false,
-    adStartTime: null,
-    embedFallbackTriggered: false,
-    aggressiveSkipTriggered: false, // Track if we've tried aggressive skip
-    AD_PERSIST_THRESHOLD: 500, // 500ms - first tier: aggressive skip attempts
-    AD_PERSIST_THRESHOLD_FINAL: 1500, // 1500ms - final tier: embed fallback
 
     /**
      * Initialize ad skipper
@@ -444,8 +322,9 @@
     },
 
     /**
-     * Layer 3 & 4: Fallback ad detection, skipping, and embed replacement
-     * Enhanced with 2024/2025 YouTube UI selectors and embed fallback
+     * Layer 3: Fallback ad detection and skipping
+     * Only triggers if ads slip through Layers 1-2 (should be rare)
+     * More aggressive detection and immediate skipping
      */
     handleAdDetection: function() {
       var video = document.querySelector('.video-stream');
@@ -453,42 +332,19 @@
 
       if (!video || !moviePlayer) return;
 
-      // Multi-signal ad detection (enhanced for 2024/2025 desktop)
+      // Multi-signal ad detection (more comprehensive)
       var isNowInAd = (moviePlayer && (
           moviePlayer.classList.contains('ad-showing') ||
           moviePlayer.classList.contains('ad-interrupting')
         )) ||
         document.querySelector('.ytp-ad-player-overlay') !== null ||
         document.querySelector('.video-ads.ytp-ad-module') !== null ||
-        document.querySelector('.ytp-ad-text') !== null ||
-        // 2024 selectors
-        document.querySelector('.ytp-ad-preview-container') !== null ||
-        document.querySelector('.ytp-ad-action-interstitial') !== null ||
-        document.querySelector('.ytp-ad-player-overlay-instream-info') !== null ||
-        document.querySelector('.ytp-ad-persistent-progress-bar-container') !== null ||
-        // NEW: Desktop 2024/2025 specific selectors
-        document.querySelector('.ytp-ad-button-icon') !== null ||
-        document.querySelector('.ytp-ad-simple-ad-badge') !== null ||
-        document.querySelector('.ytp-ad-visit-advertiser-button') !== null ||
-        document.querySelector('.ytp-ad-survey-questions') !== null ||
-        document.querySelector('.ytp-ad-feedback-dialog-renderer') !== null ||
-        document.querySelector('.ytp-ad-info-dialog-container') !== null ||
-        document.querySelector('.ytp-ad-overlay-slot') !== null ||
-        // Check for visible ad preview text (handles display:none checks)
-        (function() {
-          var badge = document.querySelector('.ytp-ad-preview-text');
-          return badge && window.getComputedStyle(badge).display !== 'none';
-        })();
+        document.querySelector('.ytp-ad-text') !== null;
 
       var wasInAd = this.lastAdState;
 
-      // STATE TRANSITION: Entering ad state
+      // STATE TRANSITION: Entering ad state (fallback - should be rare with MAIN world script)
       if (isNowInAd && !wasInAd) {
-        // Reset fallback flags for new ad
-        this.embedFallbackTriggered = false;
-        this.aggressiveSkipTriggered = false;
-        this.adStartTime = Date.now();
-
         // Save user's mute preference
         this.userWasMuted = video.muted;
 
@@ -510,9 +366,6 @@
 
       // STATE TRANSITION: Exiting ad state
       if (!isNowInAd && wasInAd) {
-        // Reset tracking
-        this.adStartTime = null;
-
         // Restore user's original mute preference
         video.muted = this.userWasMuted;
 
@@ -539,149 +392,29 @@
         }
         this.clickSkipButton();
         this.removeAdOverlays();
-
-        // LAYER 4: Tiered fallback for persistent ads (server-side injection)
-        if (!this.embedFallbackTriggered && this.adStartTime) {
-          var adDuration = Date.now() - this.adStartTime;
-
-          // First tier (500ms): Aggressive skip attempts
-          if (adDuration > this.AD_PERSIST_THRESHOLD && !this.aggressiveSkipTriggered) {
-            console.log('[SafeGaze] Ad persisted for ' + adDuration + 'ms, increasing skip aggressiveness');
-            this.aggressiveSkipTriggered = true;
-
-            // More aggressive skip attempts
-            video.playbackRate = 16;
-            if (video.duration && !isNaN(video.duration)) {
-              video.currentTime = video.duration;
-            }
-
-            // Try to click any possible skip element
-            var allButtons = document.querySelectorAll('button, [role="button"]');
-            for (var k = 0; k < allButtons.length; k++) {
-              var btn = allButtons[k];
-              var text = (btn.textContent || '').toLowerCase();
-              if (text.indexOf('skip') !== -1 || text.indexOf('close') !== -1) {
-                btn.click();
-              }
-            }
-          }
-
-          // Final tier (1500ms): Embed fallback
-          if (adDuration > this.AD_PERSIST_THRESHOLD_FINAL) {
-            console.log('[SafeGaze] Ad persisted for ' + adDuration + 'ms, triggering embed fallback');
-            this.replaceWithEmbed();
-            this.embedFallbackTriggered = true;
-          }
-        }
       }
+
+      // When STAYING in content state - DO NOTHING (respect user controls)
 
       // Update state for next check
       this.lastAdState = isNowInAd;
     },
 
     /**
-     * Layer 4: Replace video player with youtube-nocookie.com embed
-     * This completely bypasses YouTube's ad system including server-side injection
-     */
-    replaceWithEmbed: function() {
-      var url = new URL(window.location.href);
-      var videoID = url.searchParams.get('v');
-
-      // Handle live URLs: /live/VIDEO_ID
-      if (!videoID) {
-        var pathSegments = url.pathname.split('/');
-        var liveIndex = pathSegments.indexOf('live');
-        if (liveIndex !== -1 && liveIndex + 1 < pathSegments.length) {
-          videoID = pathSegments[liveIndex + 1];
-        }
-      }
-
-      if (!videoID) {
-        console.warn('[SafeGaze] Could not extract video ID for embed fallback');
-        return;
-      }
-
-      var video = document.querySelector('.video-stream');
-      var currentTime = video ? Math.floor(video.currentTime) : 0;
-
-      // Get playlist info if available
-      var playlistParam = '';
-      if (url.searchParams.has('list')) {
-        playlistParam = '&list=' + url.searchParams.get('list');
-      }
-
-      // Build embed URL
-      var embedUrl = 'https://www.youtube-nocookie.com/embed/' + videoID +
-                     '?autoplay=1&modestbranding=1&rel=0&start=' + currentTime + playlistParam;
-
-      // Create iframe
-      var iframe = document.createElement('iframe');
-      iframe.setAttribute('src', embedUrl);
-      iframe.setAttribute('frameborder', '0');
-      iframe.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share');
-      iframe.setAttribute('allowfullscreen', 'true');
-      iframe.setAttribute('mozallowfullscreen', 'mozallowfullscreen');
-      iframe.setAttribute('msallowfullscreen', 'msallowfullscreen');
-      iframe.setAttribute('webkitallowfullscreen', 'webkitallowfullscreen');
-
-      iframe.style.cssText = 'width:100%;height:100%;position:absolute;top:0;left:0;z-index:9999;pointer-events:all;border:none;';
-
-      var player = document.querySelector('.html5-video-player');
-      if (player) {
-        // Remove existing videos to prevent audio overlap
-        var existingVideos = player.querySelectorAll('video');
-        existingVideos.forEach(function(v) {
-          v.muted = true;
-          v.pause();
-          v.remove();
-        });
-
-        // Remove any existing iframes
-        var existingIframes = player.querySelectorAll('iframe');
-        existingIframes.forEach(function(f) {
-          f.remove();
-        });
-
-        // Add the new embed
-        player.appendChild(iframe);
-        console.log('[SafeGaze] Video player replaced with ad-free embed');
-
-        // Stop the ad detection loop since we've replaced the player
-        this.cleanup();
-      }
-    },
-
-    /**
-     * Click skip ad button (enhanced for 2024/2025 desktop)
+     * Click skip ad button
      */
     clickSkipButton: function() {
       var skipSelectors = [
         '.ytp-ad-skip-button',
         '.ytp-ad-skip-button-modern',
-        '.ytp-skip-ad-button',
-        '.ytp-ad-skip-button-slot',
-        // 2024 selectors
-        'button.ytp-ad-skip-button-modern',
-        '.ytp-ad-skip-button-container button',
-        // NEW: 2024/2025 desktop selectors
-        '.ytp-ad-skip-button-text',
-        '[class*="skip-button"]',
-        '.videoAdUiSkipButton',
-        '.ytp-ad-overlay-close-button',
-        '.ytp-ad-skip-button-icon',
-        // Generic button inside skip container
-        '.ytp-ad-skip-button-container *[role="button"]'
+        '.ytp-skip-ad-button'
       ];
 
       for (var i = 0; i < skipSelectors.length; i++) {
-        var buttons = document.querySelectorAll(skipSelectors[i]);
-        for (var j = 0; j < buttons.length; j++) {
-          var button = buttons[j];
-          if (button && button.offsetParent !== null) {
-            // Try multiple click methods for maximum compatibility
-            button.click();
-            button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-          }
+        var button = document.querySelector(skipSelectors[i]);
+        if (button && button.offsetParent !== null) {
+          button.click();
+          break;
         }
       }
     },
@@ -695,11 +428,7 @@
         '.ytp-ad-text-overlay',
         '.ytp-ad-image-overlay',
         '.ytp-ad-player-overlay-flyout-cta',
-        '.ytp-ad-overlay-close-container',
-        // New 2024 selectors
-        '.ytp-ad-action-interstitial',
-        '.ytp-ad-player-overlay-instream-info',
-        '.ytp-ad-message-container'
+        '.ytp-ad-overlay-close-container'
       ];
 
       for (var i = 0; i < adOverlaySelectors.length; i++) {
@@ -711,7 +440,7 @@
     },
 
     /**
-     * Inject CSS for ad hiding (enhanced for 2024/2025 desktop)
+     * Inject CSS for ad hiding
      */
     injectAdBlockingCSS: function() {
       var existingStyle = document.getElementById('sg-youtube-ad-skipper-styles');
@@ -726,9 +455,7 @@
         '.ad-showing .ytp-ad-player-overlay,\n' +
         '.ad-interrupting .video-ads,\n' +
         '.ad-interrupting .ytp-ad-module,\n' +
-        '.ad-interrupting .ytp-ad-player-overlay,\n' +
-        '.ytp-ad-preview-container,\n' +
-        '.ytp-ad-action-interstitial {\n' +
+        '.ad-interrupting .ytp-ad-player-overlay {\n' +
         '  display: none !important;\n' +
         '  visibility: hidden !important;\n' +
         '}\n' +
@@ -740,50 +467,13 @@
         'ytd-compact-promoted-video-renderer,\n' +
         'ytd-promoted-video-renderer,\n' +
         'ytd-banner-promo-renderer,\n' +
-        'ytd-action-companion-ad-renderer,\n' +
-        'ytd-in-feed-ad-layout-renderer,\n' +
-        'ytd-ad-slot-renderer,\n' +
-        'ytd-statement-banner-renderer,\n' +
-        'ytd-rich-item-renderer:has(ytd-ad-slot-renderer),\n' +
-        '#masthead-ad,\n' +
-        '/* NEW: Enhanced 2024/2025 desktop ad renderers */\n' +
-        'ytd-companion-slot-renderer,\n' +
-        'ytd-promoted-sparkles-text-search-renderer,\n' +
-        'ytd-search-pyv-renderer,\n' +
-        'ytd-single-option-survey-renderer,\n' +
-        'ytd-video-masthead-ad-advertiser-info-renderer,\n' +
-        'ytd-player-legacy-desktop-watch-ads-renderer,\n' +
-        '#feed-pyv-container,\n' +
-        '#merch-shelf,\n' +
-        '#offer-module,\n' +
-        '#pla-shelf,\n' +
-        '#premium-yva,\n' +
-        '#promo-info,\n' +
-        '#promo-list,\n' +
-        '#promotion-shelf,\n' +
-        '#shelf-pyv-container,\n' +
-        '#video-masthead,\n' +
-        '.companion-ad-container,\n' +
-        '.GoogleActiveViewElement,\n' +
-        '.ytd-merch-shelf-renderer,\n' +
-        '[class*="ytd-display-ad-"],\n' +
-        '[layout*="display-ad-"] {\n' +
+        'ytd-action-companion-ad-renderer {\n' +
         '  display: none !important;\n' +
         '}\n' +
         '\n' +
-        '/* Hide ad progress and overlay elements */\n' +
-        '.ytp-ad-action-interstitial-background-container,\n' +
-        '.ytp-ad-action-interstitial-slot,\n' +
-        '.ytp-ad-image-overlay,\n' +
-        '.ytp-ad-overlay-container,\n' +
-        '.ytp-ad-progress,\n' +
-        '.ytp-ad-progress-list {\n' +
-        '  display: none !important;\n' +
-        '}\n' +
-        '\n' +
-        '/* Hide skip ad button container (auto-skip handles it) */\n' +
+        '/* Hide skip ad button container */\n' +
         '.ytp-ad-skip-button-container {\n' +
-        '  opacity: 0 !important;\n' +
+        '  display: none !important;\n' +
         '}';
 
       // Append to head or documentElement (for early injection)
@@ -803,10 +493,7 @@
         if (self.isWatchPage()) {
           self.cleanup();
           self.isInitialized = false;
-          self.lastAdState = false;
-          self.adStartTime = null;
-          self.embedFallbackTriggered = false;
-          self.aggressiveSkipTriggered = false;
+          self.lastAdState = false; // Reset state for new video
           self.init();
         }
       });
@@ -815,10 +502,7 @@
         if (self.isWatchPage()) {
           self.cleanup();
           self.isInitialized = false;
-          self.lastAdState = false;
-          self.adStartTime = null;
-          self.embedFallbackTriggered = false;
-          self.aggressiveSkipTriggered = false;
+          self.lastAdState = false; // Reset state for new video
           self.init();
         }
       });
@@ -828,8 +512,7 @@
      * Check if current page is a YouTube watch page
      */
     isWatchPage: function() {
-      return (window.location.pathname === '/watch' && window.location.search.indexOf('v=') !== -1) ||
-             window.location.pathname.indexOf('/live/') !== -1;
+      return window.location.pathname === '/watch' && window.location.search.indexOf('v=') !== -1;
     },
 
     /**
@@ -862,7 +545,7 @@
 
   // Only run on YouTube domains
   if (window.location.hostname.indexOf('youtube.com') !== -1) {
-    // Initialize Layer 3 & 4 (DOM-based fallback + embed replacement)
+    // Initialize Layer 3 (DOM-based fallback)
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', function() {
         YouTubeAdSkipper.init();
@@ -872,9 +555,7 @@
     }
   }
 
-  // Expose for debugging
+  // Expose for debugging (optional - remove in production if desired)
   window.__SAFEGAZE_YT_AD_SKIPPER__ = YouTubeAdSkipper;
-
-  console.log('[SafeGaze] YouTube Ads Blocker v1.2.0 initialized (desktop SSAI fix)');
 
 })();
