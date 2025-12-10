@@ -11,6 +11,7 @@
  * - Layer 1: Player data interception (ytInitialPlayerResponse, fetch, XHR hooks)
  * - Layer 2: Blocked URL patterns (for mobile network-level blocking)
  * - Layer 3: DOM-based fallback (ad detection, skip buttons, overlay removal)
+ * - Layer 4: Feed ad monitoring (NEW - sponsored content in home/search feeds)
  */
 (function() {
   'use strict';
@@ -244,12 +245,14 @@
   }
 
   // =============================================================================
-  // LAYER 3: DOM-BASED FALLBACK
+  // LAYER 3 & 4: ENHANCED DOM-BASED FALLBACK AND FEED MONITORING
   // Detects and skips ads that slip through Layer 1-2
+  // Monitors and removes sponsored content from feeds
   // =============================================================================
 
   var YouTubeAdSkipper = {
     observer: null,
+    feedObserver: null,
     checkInterval: null,
     isInitialized: false,
     lastAdState: false,
@@ -262,14 +265,23 @@
       var self = this;
       if (this.isInitialized) return;
 
-      // Inject CSS for ad hiding
+      // Inject CSS for ad hiding (ENHANCED)
       this.injectAdBlockingCSS();
 
-      // Wait for player then start detection
-      this.waitForPlayer().then(function() {
-        self.setupAdDetection();
+      // Always setup feed ad monitoring (works on all pages)
+      this.setupFeedAdMonitoring();
+
+      // Only setup video player monitoring on watch pages
+      if (this.isWatchPage()) {
+        // Wait for player then start detection
+        this.waitForPlayer().then(function() {
+          self.setupAdDetection();
+          self.isInitialized = true;
+        });
+      } else {
+        // For non-watch pages, still consider initialized
         self.isInitialized = true;
-      });
+      }
 
       // Handle YouTube SPA navigation
       this.observeYouTubeNavigation();
@@ -319,6 +331,126 @@
       this.checkInterval = setInterval(function() {
         self.handleAdDetection();
       }, 100);
+    },
+
+    /**
+     * Setup monitoring for feed ads and sponsored content (NEW)
+     */
+    setupFeedAdMonitoring: function() {
+      var self = this;
+      
+      // Create a MutationObserver to watch for sponsored content in feeds
+      this.feedObserver = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+          if (mutation.type === 'childList') {
+            // Check added nodes for sponsored content
+            mutation.addedNodes.forEach(function(node) {
+              if (node instanceof HTMLElement) {
+                self.checkAndRemoveSponsoredContent(node);
+                
+                // Also check children of the added node
+                var sponsoredElements = node.querySelectorAll('.ytd-search-pyv-renderer, .ytd-promoted-video-renderer, .ytd-merch-shelf-renderer, [aria-label*="sponsored"], [aria-label*="Sponsored"], [aria-label*="ad"], [aria-label*="Ad"]');
+                sponsoredElements.forEach(function(element) {
+                  self.checkAndRemoveSponsoredContent(element);
+                });
+              }
+            });
+          }
+        });
+      });
+
+      // Start observing the main content areas where ads appear
+      var targets = [
+        document.querySelector('ytd-browse'),
+        document.querySelector('ytd-search'),
+        document.querySelector('ytd-two-column-browse-results-renderer'),
+        document.querySelector('ytd-rich-grid-renderer'),
+        document.querySelector('ytd-watch-flexy'),
+        document.querySelector('body')
+      ].filter(Boolean); // Filter out null values
+
+      targets.forEach(function(target) {
+        if (target instanceof Node) {
+          self.feedObserver.observe(target, {
+            childList: true,
+            subtree: true
+          });
+        }
+      });
+
+      // Initial scan for existing sponsored content
+      this.removeExistingSponsoredContent();
+    },
+
+    /**
+     * Check and remove sponsored content (NEW)
+     */
+    checkAndRemoveSponsoredContent: function(element) {
+      if (!element) return;
+
+      var adSelectors = [
+        '.ytd-search-pyv-renderer',
+        '.ytd-promoted-video-renderer', 
+        '.ytd-merch-shelf-renderer',
+        '.ytd-single-option-survey-renderer',
+        '[aria-label*="sponsored"]',
+        '[aria-label*="Sponsored"]',
+        '[aria-label*="ad"]',
+        '[aria-label*="Ad"]',
+        '[data-ad-impression]'
+      ];
+
+      var shouldRemove = false;
+      
+      // Check if element matches any ad selector
+      for (var i = 0; i < adSelectors.length; i++) {
+        try {
+          if (element.matches && element.matches(adSelectors[i])) {
+            shouldRemove = true;
+            break;
+          }
+          // Also check if closest ancestor matches
+          if (element.closest && element.closest(adSelectors[i])) {
+            shouldRemove = true;
+            break;
+          }
+        } catch (e) {
+          // Invalid selector, skip
+        }
+      }
+
+      if (shouldRemove) {
+        element.remove();
+        console.log('[SafeGaze] Removed sponsored content from feed');
+      }
+    },
+
+    /**
+     * Remove existing sponsored content from the page (NEW)
+     */
+    removeExistingSponsoredContent: function() {
+      var adSelectors = [
+        '.ytd-search-pyv-renderer',
+        '.ytd-promoted-video-renderer',
+        '.ytd-merch-shelf-renderer', 
+        '.ytd-single-option-survey-renderer',
+        '[aria-label*="sponsored"]',
+        '[aria-label*="Sponsored"]',
+        '[aria-label*="ad"]',
+        '[aria-label*="Ad"]',
+        '[data-ad-impression]'
+      ];
+
+      adSelectors.forEach(function(selector) {
+        try {
+          var elements = document.querySelectorAll(selector);
+          elements.forEach(function(element) {
+            element.remove();
+          });
+        } catch (e) {
+          // Invalid selector, skip
+        }
+      });
     },
 
     /**
@@ -440,7 +572,7 @@
     },
 
     /**
-     * Inject CSS for ad hiding
+     * Inject CSS for ad hiding (ENHANCED)
      */
     injectAdBlockingCSS: function() {
       var existingStyle = document.getElementById('sg-youtube-ad-skipper-styles');
@@ -471,7 +603,33 @@
         '  display: none !important;\n' +
         '}\n' +
         '\n' +
-        '/* Hide skip ad button container */\n' +
+        '/* 2024 YouTube ad selectors - Home Feed, Search, and Browse */\n' +
+        '.ytd-search-pyv-renderer,\n' +                    // Search result promoted videos
+        '.ytd-merch-shelf-renderer,\n' +                   // Merchandise shelves (promotional)
+        '.ad-container,\n' +                              // General ad containers
+        '#player-ads,\n' +                                // Player area ads
+        '.ytp-ad-overlay-container,\n' +                  // Ad overlay containers
+        'YTM-PROMOTED-VIDEO-RENDERER,\n' +               // Mobile promoted videos
+        '.iv-promo,\n' +                                 // In-video promotions
+        '.companion-ad {\n' +                             // Companion ads
+        '  display: none !important;\n' +
+        '  visibility: hidden !important;\n' +
+        '}\n' +
+        '\n' +
+        '/* Additional ad containers and overlays */\n' +
+        '.video-ads,\n' +
+        '.ytp-ad-progress-list,\n' +
+        '.ytd-single-option-survey-renderer,\n' +          // Promotional surveys
+        '[data-ad-impression],\n' +                      // Elements with ad tracking
+        '[aria-label*="ad"],\n' +                       // Elements with ad in aria-label
+        '[aria-label*="Ad"],\n' +                       // Elements with Ad in aria-label
+        '[aria-label*="sponsored"],\n' +                 // Elements with sponsored in aria-label
+        '[aria-label*="Sponsored"] {\n' +                 // Elements with Sponsored in aria-label
+        '  display: none !important;\n' +
+        '  visibility: hidden !important;\n' +
+        '}\n' +
+        '\n' +
+        '/* Skip ad button container */\n' +
         '.ytp-ad-skip-button-container {\n' +
         '  display: none !important;\n' +
         '}';
@@ -490,22 +648,38 @@
       var self = this;
 
       window.addEventListener('yt-navigate-finish', function() {
-        if (self.isWatchPage()) {
+        if (self.isYouTubePage()) {
           self.cleanup();
           self.isInitialized = false;
-          self.lastAdState = false; // Reset state for new video
+          self.lastAdState = false; // Reset state for new page
           self.init();
         }
       });
 
       window.addEventListener('popstate', function() {
-        if (self.isWatchPage()) {
+        if (self.isYouTubePage()) {
           self.cleanup();
           self.isInitialized = false;
-          self.lastAdState = false; // Reset state for new video
+          self.lastAdState = false; // Reset state for new page
           self.init();
         }
       });
+    },
+
+    /**
+     * Check if current page is a YouTube page (any page that should have ad blocking)
+     */
+    isYouTubePage: function() {
+      var hostname = window.location.hostname;
+      var pathname = window.location.pathname;
+      
+      // Check if we're on YouTube domain
+      if (!hostname || hostname.indexOf('youtube.com') === -1) {
+        return false;
+      }
+      
+      // Allow ad blocking on all YouTube pages
+      return true;
     },
 
     /**
@@ -524,6 +698,11 @@
         this.observer = null;
       }
 
+      if (this.feedObserver) {
+        this.feedObserver.disconnect();
+        this.feedObserver = null;
+      }
+
       if (this.checkInterval !== null) {
         clearInterval(this.checkInterval);
         this.checkInterval = null;
@@ -540,12 +719,12 @@
   };
 
   // =============================================================================
-  // AUTO-INITIALIZATION
+  // AUTO-INITIALIZATION (ENHANCED)
   // =============================================================================
 
   // Only run on YouTube domains
   if (window.location.hostname.indexOf('youtube.com') !== -1) {
-    // Initialize Layer 3 (DOM-based fallback)
+    // Initialize Layer 3 & 4 (DOM-based fallback + feed monitoring) on ALL YouTube pages
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', function() {
         YouTubeAdSkipper.init();
