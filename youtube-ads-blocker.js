@@ -1,5 +1,13 @@
 /**
- * SafeGaze YouTube Ads Blocker - Standalone Script
+ * SafeGaze YouTube Ads Blocker - Local Enhanced Version
+ * LOCALLY MAINTAINED - Updated selectors for December 2025 YouTube
+ * Based on: https://github.com/AnisRafid/safegaze-yt-ads-blocker
+ *
+ * Changes from upstream:
+ * - Updated ad container selectors (ytd-ad-slot-renderer, etc.)
+ * - Added modern badge detection (ad-badge-view-model, badge-shape)
+ * - Enhanced detection with checkIfSponsored() function
+ * - Improved CSS hiding for 2025 YouTube structure
  *
  * Cross-platform compatible script for blocking YouTube ads.
  * Can be used in:
@@ -7,11 +15,11 @@
  * - Android WebView
  * - iOS WKWebView
  *
- * This script combines three layers of ad blocking:
+ * This script combines four layers of ad blocking:
  * - Layer 1: Player data interception (ytInitialPlayerResponse, fetch, XHR hooks)
  * - Layer 2: Blocked URL patterns (for mobile network-level blocking)
  * - Layer 3: DOM-based fallback (ad detection, skip buttons, overlay removal)
- * - Layer 4: Feed ad monitoring (NEW - sponsored content in home/search feeds)
+ * - Layer 4: Feed ad monitoring (sponsored content in home/search feeds)
  */
 (function() {
   'use strict';
@@ -338,48 +346,186 @@
      */
     setupFeedAdMonitoring: function() {
       var self = this;
-      
-      // Create a MutationObserver to watch for sponsored content in feeds
+
+      // Create observer immediately
       this.feedObserver = new MutationObserver(function(mutations) {
+        var adsDetected = false;
+
         mutations.forEach(function(mutation) {
           if (mutation.type === 'childList') {
-            // Check added nodes for sponsored content
             mutation.addedNodes.forEach(function(node) {
               if (node instanceof HTMLElement) {
-                self.checkAndRemoveSponsoredContent(node);
-                
-                // Also check children of the added node
-                var sponsoredElements = node.querySelectorAll('.ytd-search-pyv-renderer, .ytd-promoted-video-renderer, .ytd-merch-shelf-renderer, [aria-label*="sponsored"], [aria-label*="Sponsored"], [aria-label*="ad"], [aria-label*="Ad"]');
+                // Check if it's an ad container
+                if (self.checkIfSponsored(node)) {
+                  self.cleanupAdParentContainers(node);
+                  adsDetected = true;
+                  console.log('[SafeGaze] Removed sponsored content:', node.tagName);
+                  return;
+                }
+
+                // Check children using modern selectors
+                var sponsoredElements = node.querySelectorAll(
+                  'ytd-ad-slot-renderer, ' +
+                  'ytd-in-feed-ad-layout-renderer, ' +
+                  'ad-badge-view-model, ' +
+                  'ytd-display-ad-renderer'
+                );
+
                 sponsoredElements.forEach(function(element) {
-                  self.checkAndRemoveSponsoredContent(element);
+                  self.cleanupAdParentContainers(element);
+                  adsDetected = true;
+                  console.log('[SafeGaze] Removed sponsored container');
                 });
               }
             });
           }
         });
-      });
 
-      // Start observing the main content areas where ads appear
-      var targets = [
-        document.querySelector('ytd-browse'),
-        document.querySelector('ytd-search'),
-        document.querySelector('ytd-two-column-browse-results-renderer'),
-        document.querySelector('ytd-rich-grid-renderer'),
-        document.querySelector('ytd-watch-flexy'),
-        document.querySelector('body')
-      ].filter(Boolean); // Filter out null values
-
-      targets.forEach(function(target) {
-        if (target instanceof Node) {
-          self.feedObserver.observe(target, {
-            childList: true,
-            subtree: true
-          });
+        // Debounced reflow after all mutations processed
+        if (adsDetected) {
+          self.debouncedGridReflow();
         }
       });
 
-      // Initial scan for existing sponsored content
+      // Start observing body immediately
+      // Body always exists, will catch all content
+      this.feedObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+
+      // Initial cleanup
       this.removeExistingSponsoredContent();
+    },
+
+    /**
+     * Remove parent containers and force grid reflow
+     * This eliminates empty space in YouTube's grid layout
+     * @param {HTMLElement} adElement - The detected ad element
+     */
+    cleanupAdParentContainers: function(adElement) {
+      if (!adElement) return;
+
+      var self = this;
+
+      try {
+        // Find the grid item container (ytd-rich-item-renderer)
+        var richItem = adElement.closest('ytd-rich-item-renderer');
+
+        if (richItem) {
+          // Mark for CSS hiding first (instant)
+          richItem.setAttribute('data-sg-ad-removed', 'true');
+
+          // Schedule DOM removal after CSS hiding takes effect
+          setTimeout(function() {
+            // Check if parent section will be empty
+            var richSection = richItem.closest('ytd-rich-section-renderer');
+            var shouldRemoveSection = false;
+
+            if (richSection) {
+              // Check if section only contains this ad item
+              var sectionItems = richSection.querySelectorAll('ytd-rich-item-renderer');
+              var nonAdItems = Array.prototype.filter.call(sectionItems, function(item) {
+                return !item.hasAttribute('data-sg-ad-removed') && item !== richItem;
+              });
+
+              shouldRemoveSection = nonAdItems.length === 0;
+            }
+
+            // Remove the item
+            richItem.remove();
+
+            // Remove empty section if applicable
+            if (shouldRemoveSection && richSection) {
+              richSection.remove();
+            }
+
+            // Force grid reflow
+            self.forceGridReflow();
+
+            console.log('[SafeGaze] Cleaned up ad container hierarchy');
+          }, 50); // 50ms delay ensures CSS hiding happens first
+        }
+      } catch (e) {
+        console.error('[SafeGaze] Error cleaning up ad containers:', e);
+      }
+    },
+
+    /**
+     * Force YouTube grid to recalculate layout
+     * Uses requestAnimationFrame for optimal performance
+     */
+    forceGridReflow: function() {
+      requestAnimationFrame(function() {
+        var grids = document.querySelectorAll('ytd-rich-grid-renderer');
+
+        grids.forEach(function(grid) {
+          // Trigger reflow by reading offsetHeight then modifying style
+          var height = grid.offsetHeight; // Force browser to calculate layout
+
+          // Temporarily adjust grid properties to force recalculation
+          grid.style.gridTemplateColumns = window.getComputedStyle(grid).gridTemplateColumns;
+
+          // Reset on next frame to allow browser to optimize
+          requestAnimationFrame(function() {
+            grid.style.gridTemplateColumns = '';
+          });
+        });
+      });
+    },
+
+    /**
+     * Debounced grid reflow to prevent excessive calls
+     * Stores timeout reference for cleanup
+     */
+    debouncedGridReflow: function() {
+      var self = this;
+      if (self._debouncedReflowTimeout) clearTimeout(self._debouncedReflowTimeout);
+
+      self._debouncedReflowTimeout = setTimeout(function() {
+        self.forceGridReflow();
+        self._debouncedReflowTimeout = null;
+      }, 150); // Wait 150ms after last ad removal
+    },
+
+    /**
+     * Enhanced sponsored content detection
+     * Uses multiple strategies for reliability
+     */
+    checkIfSponsored: function(element) {
+      if (!element) return false;
+
+      // Strategy 1: Check for modern ad containers
+      if (element.tagName === 'YTD-AD-SLOT-RENDERER' ||
+        element.tagName === 'YTD-IN-FEED-AD-LAYOUT-RENDERER' ||
+        element.tagName === 'AD-BADGE-VIEW-MODEL') {
+        return true;
+      }
+
+      // Strategy 2: Check for parent containers
+      if (element.closest && (
+        element.closest('ytd-ad-slot-renderer') ||
+        element.closest('ytd-in-feed-ad-layout-renderer'))) {
+        return true;
+      }
+
+      // Strategy 3: Text content analysis
+      var textContent = element.textContent || '';
+      if (textContent.includes('Sponsored') ||
+        textContent.includes('Ad ·')) {
+        // Verify it's in a badge/metadata context
+        var badge = element.querySelector('badge-shape, ad-badge-view-model');
+        if (badge) return true;
+      }
+
+      // Strategy 4: Check aria-labels (case-insensitive)
+      var ariaLabel = element.getAttribute('aria-label') || '';
+      if (ariaLabel.toLowerCase().includes('sponsored') ||
+        ariaLabel.toLowerCase().includes('ad')) {
+        return true;
+      }
+
+      return false;
     },
 
     /**
@@ -389,19 +535,25 @@
       if (!element) return;
 
       var adSelectors = [
-        '.ytd-search-pyv-renderer',
-        '.ytd-promoted-video-renderer', 
+        // Modern YouTube ad containers (2025)
+        'ytd-ad-slot-renderer',
+        'ytd-in-feed-ad-layout-renderer',
+        'ad-badge-view-model',
+        'ytd-display-ad-renderer',
+
+        // Legacy selectors (keep for compatibility)
         '.ytd-merch-shelf-renderer',
         '.ytd-single-option-survey-renderer',
-        '[aria-label*="sponsored"]',
-        '[aria-label*="Sponsored"]',
-        '[aria-label*="ad"]',
-        '[aria-label*="Ad"]',
-        '[data-ad-impression]'
+        'ytd-statement-banner-renderer',
+        'ytd-banner-promo-renderer',
+
+        // Video masthead ads
+        'ytd-video-masthead-ad-v3-renderer',
+        'ytd-video-masthead-ad-primary-video-renderer'
       ];
 
       var shouldRemove = false;
-      
+
       // Check if element matches any ad selector
       for (var i = 0; i < adSelectors.length; i++) {
         try {
@@ -430,27 +582,44 @@
      */
     removeExistingSponsoredContent: function() {
       var adSelectors = [
-        '.ytd-search-pyv-renderer',
-        '.ytd-promoted-video-renderer',
-        '.ytd-merch-shelf-renderer', 
+        // Modern YouTube ad containers (2025)
+        'ytd-ad-slot-renderer',
+        'ytd-in-feed-ad-layout-renderer',
+        'ad-badge-view-model',
+        'ytd-display-ad-renderer',
+
+        // Legacy selectors (keep for compatibility)
+        '.ytd-merch-shelf-renderer',
         '.ytd-single-option-survey-renderer',
-        '[aria-label*="sponsored"]',
-        '[aria-label*="Sponsored"]',
-        '[aria-label*="ad"]',
-        '[aria-label*="Ad"]',
-        '[data-ad-impression]'
+        'ytd-statement-banner-renderer',
+        'ytd-banner-promo-renderer',
+
+        // Video masthead ads
+        'ytd-video-masthead-ad-v3-renderer',
+        'ytd-video-masthead-ad-primary-video-renderer'
       ];
+
+      var self = this;
+      var foundAds = false;
 
       adSelectors.forEach(function(selector) {
         try {
           var elements = document.querySelectorAll(selector);
           elements.forEach(function(element) {
-            element.remove();
+            self.cleanupAdParentContainers(element);
+            foundAds = true;
           });
         } catch (e) {
           // Invalid selector, skip
         }
       });
+
+      // Single reflow after all initial ads removed
+      if (foundAds) {
+        setTimeout(function() {
+          self.forceGridReflow();
+        }, 200); // 200ms ensures all DOM removals complete
+      }
     },
 
     /**
@@ -632,6 +801,45 @@
         '/* Skip ad button container */\n' +
         '.ytp-ad-skip-button-container {\n' +
         '  display: none !important;\n' +
+        '}\n' +
+        '\n' +
+        '/* Modern YouTube Ad Containers (December 2025) */\n' +
+        'ytd-ad-slot-renderer,\n' +
+        'ytd-in-feed-ad-layout-renderer,\n' +
+        'ad-badge-view-model,\n' +
+        'ytd-rich-item-renderer:has(> #content > ytd-ad-slot-renderer),\n' +
+        'ytd-item-section-renderer:has(ytd-ad-slot-renderer),\n' +
+        'ytd-video-masthead-ad-primary-video-renderer,\n' +
+        'ytd-statement-banner-renderer,\n' +
+        'ytd-banner-promo-renderer,\n' +
+        'ytd-in-feed-ad-layout-renderer,\n' +
+        'ytd-primetime-promo-renderer {\n' +
+        '  display: none !important;\n' +
+        '  visibility: hidden !important;\n' +
+        '  height: 0 !important;\n' +
+        '  margin: 0 !important;\n' +
+        '  padding: 0 !important;\n' +
+        '}\n' +
+        '\n' +
+        '/* Force grid to collapse when items are removed */\n' +
+        'ytd-rich-grid-renderer {\n' +
+        '  grid-auto-rows: minmax(0, auto) !important;\n' +
+        '}\n' +
+        '\n' +
+        '/* Hide empty rich sections completely */\n' +
+        'ytd-rich-section-renderer:empty,\n' +
+        'ytd-rich-section-renderer:has(> #content:empty) {\n' +
+        '  display: none !important;\n' +
+        '  height: 0 !important;\n' +
+        '  margin: 0 !important;\n' +
+        '}\n' +
+        '\n' +
+        '/* Mark items for cleanup with data attribute */\n' +
+        'ytd-rich-item-renderer[data-sg-ad-removed] {\n' +
+        '  display: none !important;\n' +
+        '  height: 0 !important;\n' +
+        '  margin: 0 !important;\n' +
+        '  padding: 0 !important;\n' +
         '}';
 
       // Append to head or documentElement (for early injection)
@@ -672,12 +880,12 @@
     isYouTubePage: function() {
       var hostname = window.location.hostname;
       var pathname = window.location.pathname;
-      
+
       // Check if we're on YouTube domain
       if (!hostname || hostname.indexOf('youtube.com') === -1) {
         return false;
       }
-      
+
       // Allow ad blocking on all YouTube pages
       return true;
     },
@@ -706,6 +914,12 @@
       if (this.checkInterval !== null) {
         clearInterval(this.checkInterval);
         this.checkInterval = null;
+      }
+
+      // Clear any pending debounced reflows
+      if (this._debouncedReflowTimeout) {
+        clearTimeout(this._debouncedReflowTimeout);
+        this._debouncedReflowTimeout = null;
       }
     },
 
