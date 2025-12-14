@@ -359,7 +359,6 @@
                 if (self.checkIfSponsored(node)) {
                   self.cleanupAdParentContainers(node);
                   adsDetected = true;
-                  console.log('[SafeGaze] Removed sponsored content:', node.tagName);
                   return;
                 }
 
@@ -374,7 +373,6 @@
                 sponsoredElements.forEach(function(element) {
                   self.cleanupAdParentContainers(element);
                   adsDetected = true;
-                  console.log('[SafeGaze] Removed sponsored container');
                 });
               }
             });
@@ -442,8 +440,6 @@
 
             // Force grid reflow
             self.forceGridReflow();
-
-            console.log('[SafeGaze] Cleaned up ad container hierarchy');
           }, 50); // 50ms delay ensures CSS hiding happens first
         }
       } catch (e) {
@@ -573,7 +569,6 @@
 
       if (shouldRemove) {
         element.remove();
-        console.log('[SafeGaze] Removed sponsored content from feed');
       }
     },
 
