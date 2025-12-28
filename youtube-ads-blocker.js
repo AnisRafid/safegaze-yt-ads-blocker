@@ -346,43 +346,71 @@
      */
     setupFeedAdMonitoring: function() {
       var self = this;
+      var processingQueue = [];
+      var processingTimeout = null;
 
-      // Create observer immediately
-      this.feedObserver = new MutationObserver(function(mutations) {
+      // Debounced processing function to batch mutations
+      function processQueue() {
+        if (processingQueue.length === 0) return;
+
         var adsDetected = false;
+        var nodesToProcess = processingQueue.slice(); // Copy array
+        processingQueue = []; // Clear queue
 
-        mutations.forEach(function(mutation) {
-          if (mutation.type === 'childList') {
-            mutation.addedNodes.forEach(function(node) {
-              if (node instanceof HTMLElement) {
-                // Check if it's an ad container
-                if (self.checkIfSponsored(node)) {
-                  self.cleanupAdParentContainers(node);
-                  adsDetected = true;
-                  return;
-                }
+        nodesToProcess.forEach(function(node) {
+          // Skip if node is no longer in DOM
+          if (!document.contains(node)) return;
 
-                // Check children using modern selectors
-                var sponsoredElements = node.querySelectorAll(
-                  'ytd-ad-slot-renderer, ' +
-                  'ytd-in-feed-ad-layout-renderer, ' +
-                  'ad-badge-view-model, ' +
-                  'ytd-display-ad-renderer'
-                );
-
-                sponsoredElements.forEach(function(element) {
-                  self.cleanupAdParentContainers(element);
-                  adsDetected = true;
-                });
-              }
-            });
+          // Check if it's an ad container
+          if (self.checkIfSponsored(node)) {
+            self.cleanupAdParentContainers(node);
+            adsDetected = true;
+            return;
           }
+
+          // Check children using modern selectors
+          var sponsoredElements = node.querySelectorAll(
+            'ytd-ad-slot-renderer, ' +
+            'ytd-in-feed-ad-layout-renderer, ' +
+            'ytd-display-ad-renderer, ' +
+            'ytd-promoted-video-renderer'
+          );
+
+          sponsoredElements.forEach(function(element) {
+            self.cleanupAdParentContainers(element);
+            adsDetected = true;
+          });
         });
 
         // Debounced reflow after all mutations processed
         if (adsDetected) {
           self.debouncedGridReflow();
         }
+      }
+
+      // Create observer with debouncing
+      this.feedObserver = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+          if (mutation.type === 'childList') {
+            mutation.addedNodes.forEach(function(node) {
+              if (node instanceof HTMLElement) {
+                // Filter: Only process rich items and ad containers
+                // This prevents processing every single DOM change
+                if (node.tagName === 'YTD-RICH-ITEM-RENDERER' ||
+                    node.tagName === 'YTD-AD-SLOT-RENDERER' ||
+                    node.tagName === 'YTD-IN-FEED-AD-LAYOUT-RENDERER' ||
+                    node.tagName === 'YTD-DISPLAY-AD-RENDERER') {
+                  processingQueue.push(node);
+                }
+              }
+            });
+          }
+        });
+
+        // Debounce: Wait 100ms after last mutation before processing
+        // This prevents cascade effects during hover interactions
+        if (processingTimeout) clearTimeout(processingTimeout);
+        processingTimeout = setTimeout(processQueue, 100);
       });
 
       // Start observing body immediately
@@ -411,6 +439,20 @@
         var richItem = adElement.closest('ytd-rich-item-renderer');
 
         if (richItem) {
+          // PROTECTION: Verify it's actually an ad before removing
+          var containsAdElement = richItem.querySelector(
+            'ytd-ad-slot-renderer, ' +
+            'ytd-in-feed-ad-layout-renderer, ' +
+            'ytd-display-ad-renderer, ' +
+            'ytd-promoted-video-renderer, ' +
+            'ytd-promoted-sparkles-web-renderer'
+          );
+
+          // PROTECTION: Don't remove legitimate videos
+          if (!containsAdElement || self.isLegitimateVideoContainer(richItem)) {
+            return;
+          }
+
           // Mark for CSS hiding first (instant)
           richItem.setAttribute('data-sg-ad-removed', 'true');
 
@@ -485,41 +527,94 @@
     },
 
     /**
+     * Check if element is a legitimate video container that should never be removed
+     * @param {HTMLElement} element - The element to check
+     * @returns {boolean} True if it's a legitimate video container
+     */
+    isLegitimateVideoContainer: function(element) {
+      if (!element) return false;
+
+      var videoElementTypes = [
+        'YTD-VIDEO-RENDERER',
+        'YTD-GRID-VIDEO-RENDERER',
+        'YTD-COMPACT-VIDEO-RENDERER',
+        'YTD-PLAYLIST-VIDEO-RENDERER'
+      ];
+
+      // Check if element is a video renderer
+      if (videoElementTypes.indexOf(element.tagName) !== -1) {
+        return true;
+      }
+
+      // Check if element contains video renderers (but NOT ad renderers)
+      if (element.querySelector) {
+        var hasVideo = element.querySelector(
+          'ytd-video-renderer, ytd-grid-video-renderer, ' +
+          'ytd-compact-video-renderer, ytd-playlist-video-renderer'
+        );
+
+        var hasAd = element.querySelector(
+          'ytd-ad-slot-renderer, ytd-in-feed-ad-layout-renderer, ' +
+          'ytd-display-ad-renderer, ytd-promoted-video-renderer'
+        );
+
+        // Only return true if it has video AND no ads
+        return hasVideo && !hasAd;
+      }
+
+      return false;
+    },
+
+    /**
      * Enhanced sponsored content detection
      * Uses multiple strategies for reliability
      */
     checkIfSponsored: function(element) {
       if (!element) return false;
 
-      // Strategy 1: Check for modern ad containers
-      if (element.tagName === 'YTD-AD-SLOT-RENDERER' ||
-        element.tagName === 'YTD-IN-FEED-AD-LAYOUT-RENDERER' ||
-        element.tagName === 'AD-BADGE-VIEW-MODEL') {
+      // Strategy 1: Direct ad element type check (HIGHEST CONFIDENCE)
+      var adElementTypes = [
+        'YTD-AD-SLOT-RENDERER',
+        'YTD-IN-FEED-AD-LAYOUT-RENDERER',
+        'YTD-DISPLAY-AD-RENDERER',
+        'YTD-VIDEO-MASTHEAD-AD-V3-RENDERER',
+        'YTD-VIDEO-MASTHEAD-AD-PRIMARY-VIDEO-RENDERER',
+        'YTD-PROMOTED-SPARKLES-WEB-RENDERER',
+        'YTD-COMPACT-PROMOTED-VIDEO-RENDERER',
+        'YTD-PROMOTED-VIDEO-RENDERER',
+        'YTD-BANNER-PROMO-RENDERER',
+        'YTD-ACTION-COMPANION-AD-RENDERER'
+      ];
+
+      if (adElementTypes.indexOf(element.tagName) !== -1) {
         return true;
       }
 
-      // Strategy 2: Check for parent containers
-      if (element.closest && (
-        element.closest('ytd-ad-slot-renderer') ||
-        element.closest('ytd-in-feed-ad-layout-renderer'))) {
-        return true;
+      // Strategy 2: Check if element is inside an ad container (MEDIUM CONFIDENCE)
+      if (element.closest) {
+        for (var i = 0; i < adElementTypes.length; i++) {
+          if (element.closest(adElementTypes[i].toLowerCase())) {
+            return true;
+          }
+        }
       }
 
-      // Strategy 3: Text content analysis
-      var textContent = element.textContent || '';
-      if (textContent.includes('Sponsored') ||
-        textContent.includes('Ad ·')) {
-        // Verify it's in a badge/metadata context
-        var badge = element.querySelector('badge-shape, ad-badge-view-model');
-        if (badge) return true;
+      // Strategy 3: Ad badge with strict validation (MEDIUM CONFIDENCE)
+      // Only check if element IS the badge, not if it contains one
+      if (element.tagName === 'AD-BADGE-VIEW-MODEL' ||
+          element.tagName === 'BADGE-SHAPE') {
+        // Additional validation: check if badge actually says "Ad" or "Sponsored"
+        var badgeText = (element.textContent || '').trim();
+        if (badgeText === 'Ad' ||
+            badgeText === 'Sponsored' ||
+            badgeText === 'Ad ·') {
+          return true;
+        }
       }
 
-      // Strategy 4: Check aria-labels (case-insensitive)
-      var ariaLabel = element.getAttribute('aria-label') || '';
-      if (ariaLabel.toLowerCase().includes('sponsored') ||
-        ariaLabel.toLowerCase().includes('ad')) {
-        return true;
-      }
+      // REMOVED: Strategy 3 (old) - Broad text content matching
+      // REMOVED: Strategy 4 - Broad aria-label matching
+      // These caused false positives on legitimate videos
 
       return false;
     },
